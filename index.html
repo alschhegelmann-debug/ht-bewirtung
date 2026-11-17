@@ -81,6 +81,11 @@ input:focus,textarea:focus,select:focus{outline:none;border-color:var(--accent);
 .section-title{letter-spacing:2px!important}
 </style>
 <style id="theme">
+.sign-box{display:flex!important;align-items:center;gap:14px;margin-top:16px!important;padding:14px 16px;border-radius:16px;border:2px solid var(--t-line);background:var(--t-input);cursor:pointer;font-size:16px!important;font-weight:800!important}
+.sign-box input{width:26px;height:26px;flex:0 0 26px;accent-color:#16a34a}
+.sign-box small{font-weight:600;color:var(--t-muted);font-size:13px}
+.sign-box:has(input:checked){border-color:#22c55e;background:#effcf3}
+
 /* ===== Farbschema ===== */
 :root{color-scheme:light}
 body{background:var(--t-bg)!important;color:var(--t-text)!important}
@@ -233,6 +238,7 @@ input:focus,textarea:focus,select:focus{border-color:var(--t-accent)!important;b
     <div class="section">
       <h2 class="section-title">Notiz</h2>
       <textarea id="f-note" placeholder="Optional"></textarea>
+      <label class="sign-box"><input type="checkbox" id="f-sign"><span>✍️ Elektronisch unterschreiben<br><small>als <b id="sign-name">–</b></small></span></label>
       <button class="btn-main" style="margin-top:16px;" onclick="save()">✓ Beleg speichern</button>
       <div class="fbtn-row">
         <button class="fbtn fbtn-send" onclick="save('send')">📤 Speichern &amp; Versenden</button>
@@ -334,11 +340,17 @@ document.addEventListener('DOMContentLoaded', function () {
     addPhotos(e.target.files);
     e.target.value = '';
   });
+  g('f-sign').checked = lsGet('td_sign') === '1';
+  g('f-bew').addEventListener('input', updSignName);
   var savedName = lsGet('bw_name');
   if (savedName) g('f-bew').value = savedName;
+  updSignName();
   if (navigator.storage && navigator.storage.persist) { navigator.storage.persist().catch(function(){}); }
   loadAll().then(updateBadge).catch(function(){ toast('Speicher konnte nicht geladen werden', true); });
 });
+
+function updSignName(){ var n = g('f-bew').value.trim(); g('sign-name').textContent = n || '– Name bei „Wer lädt ein?“ eintragen –'; }
+function fmtDT(iso){ var d = new Date(iso); return d.toLocaleDateString('de-DE') + ' ' + d.toLocaleTimeString('de-DE',{hour:'2-digit',minute:'2-digit'}) + ' Uhr'; }
 
 function updateBadge(){
   var n = getAll().length;
@@ -350,6 +362,7 @@ function getNextNr(){
   var max = 0;
   cache.forEach(function(x){ if(x.belegNr > max) max = x.belegNr; });
   var nr = Math.max(parseInt(lsGet('td_beleg_nr') || '0', 10), max) + 1;
+  lsSet('td_sign', g('f-sign').checked ? '1' : '0');
   lsSet('td_beleg_nr', String(nr));
   return nr;
 }
@@ -447,6 +460,9 @@ function save(action){
     betrag: num(betrag), trink: num(trink), gesamt: num(betrag) + num(trink),
     note: note,
     photos: photos.slice(),
+    signed: g('f-sign').checked,
+    signedBy: g('f-sign').checked ? bew : '',
+    signedAt: g('f-sign').checked ? ((old && old.signed && old.signedBy === bew) ? old.signedAt : new Date().toISOString()) : null,
     createdAt: old ? old.createdAt : new Date().toISOString(),
     updatedAt: new Date().toISOString()
   };
@@ -473,6 +489,7 @@ function resetForm(){
   photos = [];
   renderPhotos();
   editId = null;
+  updSignName();
 }
 
 function switchTab(tab){
@@ -519,7 +536,8 @@ function showDetail(id){
     row('Betrag', b.betrag.toFixed(2)+' €') +
     row('Trinkgeld', (b.trink||0).toFixed(2)+' €') +
     row('Gesamt', '<span class="sum-green" style="color:#16a34a">'+b.gesamt.toFixed(2)+' €</span>') +
-    (b.note ? row('Notiz', esc(b.note)) : '');
+    (b.note ? row('Notiz', esc(b.note)) : '') +
+    row('Unterschrift', b.signed ? '<span class="sum-green" style="color:#16a34a">✔ ' + esc(b.signedBy) + '</span><br><small>elektronisch, ' + fmtDT(b.signedAt) + '</small>' : '<span style="color:#dc2626">nicht unterschrieben</span>');
   if(b.photos && b.photos.length){
     html += '<div class="photo-grid" style="margin-top:14px;">';
     b.photos.forEach(function(p){ html += '<div class="thumb"><img src="'+p.data+'"></div>'; });
@@ -589,11 +607,20 @@ function buildPDF(b){
       doc.setDrawColor(221); doc.line(M, y - 1.5, W - M, y - 1.5);
     });
 
-    y += 16;
+    y += 22;
     if(y > 265){ doc.addPage(); y = 30; }
-    doc.setDrawColor(34); doc.line(M, y, M + 70, y);
+    if(b.signed){
+      doc.setFont('times','bolditalic'); doc.setFontSize(20); doc.setTextColor(20,40,110);
+      doc.text(b.signedBy || '', M + 2, y - 3);
+    }
+    doc.setDrawColor(34); doc.line(M, y, M + 80, y);
     doc.setFontSize(9); doc.setTextColor(90); doc.setFont('helvetica','normal');
     doc.text('Unterschrift Bewirtender', M, y + 5);
+    if(b.signed){
+      doc.setFontSize(8.5); doc.setTextColor(22,130,60);
+      doc.text('Elektronisch unterschrieben von ' + b.signedBy + ' am ' + fmtDT(b.signedAt), M, y + 10);
+      y += 5;
+    }
     doc.setFontSize(8); doc.setTextColor(150);
     doc.text('Bewirtungsbeleg gemäß §4 Abs. 5 Nr. 2 EStG · Aufbewahrungspflicht: 10 Jahre (§147 AO) · Erstellt: ' + new Date().toLocaleDateString('de-DE'), M, y + 14);
 
@@ -632,7 +659,8 @@ function belegText(b){
     'Betrag: ' + b.betrag.toFixed(2) + ' €\n' +
     'Trinkgeld: ' + (b.trink||0).toFixed(2) + ' €\n' +
     'Gesamt: ' + b.gesamt.toFixed(2) + ' €' +
-    (b.note ? '\nNotiz: ' + b.note : '');
+    (b.note ? '\nNotiz: ' + b.note : '') +
+    (b.signed ? '\nUnterschrift: elektronisch unterschrieben von ' + b.signedBy + ' am ' + fmtDT(b.signedAt) : '');
 }
 
 function shareEntry(id){
@@ -719,6 +747,8 @@ function editEntry(id){
   g('f-trink').value = b.trink || '';
   g('f-note').value = b.note || '';
   photos = (b.photos || []).slice();
+  g('f-sign').checked = !!b.signed;
+  updSignName();
   renderPhotos();
   calc();
   switchTab('new');
